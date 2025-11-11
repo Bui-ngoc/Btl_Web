@@ -1,0 +1,92 @@
+🎯 I. Phân tích Yêu cầu Nghiệp vụ (Business Requirements - BR)
+Bảng/Module ,Thông tin chính ,Chi tiết quan trọng (từ SRS) 
+Phòng Ban (PhongBan),"ma_phong, ten_phong","nam_thanh_lap, trang_thai (Hoạt động/Ngừng) "
+Chức Vụ (ChucVu),"ma_chucvu, ten_chucvu","Mã 1 ký tự, tên chức vụ "
+Nhân Viên (NhanVien),"ma_nhan_vien, ten_nhan_vien","Mã NV tự sinh (theo quy tắc BR-01) , ma_phong (FK), ma_chuc_vu (FK), luong_co_ban, ngay_vao_lam, trang_thai (Đang làm/Đã nghỉ)."
+Chấm Công (ChamCong),ma_nhan_vien (FK),"ngay_lam, gio_vao, gio_ra (lưu trữ UTC) "
+Bảng Lương (BangLuong),"ma_nhan_vien (FK), thang, nam","tong_gio_lam (đã rounding), luong_co_ban, luong_them_gio, tong_luong "
+Tài Khoản (TaiKhoan),"username, password","role, ma_nhan_vien (FK) "
+2. ⚙️ Các Chức năng cần có (Functional Requirements - FR)
+Nhóm chức năng,Tên Chức năng (FR) ,Yêu cầu nghiệp vụ cốt lõi 
+Quản lý Danh mục,"FR1: CRUD Phòng ban, FR2: CRUD Chức vụ",Quản lý master data.
+Quản lý NV,"FR3: CRUD Nhân viên, FR4: Cập nhật Lương cơ bản",Sinh mã NV tự động (BR-01). Hỗ trợ Soft Delete (Ẩn/Bỏ ẩn).
+Chấm công,FR5: Ghi nhận Check-in/Check-out,Validate Không Overlap (BR-02). Cho phép nhiều session trong ngày.
+Payroll/Lương,FR6: Tính lương theo tháng tự động/On-demand,Rounding giờ đến 0.25h (15 phút) (BR-02). Tính Overtime 1.5x nếu > 40 giờ/tháng (BR-03).
+Báo cáo,FR7: Báo cáo tổng thu nhập theo năm/tháng,Export CSV (NFR6).
+Quản trị,FR8: Audit Log cho thao tác quan trọng,"Ghi log khi thay đổi lương, xóa NV, tính lương."
+3. 🛡️ Yêu cầu Phân quyền (Role-Based Access - NFR1)
+Role ,Quyền hạn 
+Admin,"Toàn quyền CRUD, tính lương on-demand, Hard Delete."
+HR,"Toàn quyền CRUD Nhân viên, tính lương on-demand. "
+Manager,Quyền hạn giới hạn theo phòng. Xem & Sửa NV trong phòng mình.
+Employee (NhanVien),"Xem thông tin cá nhân (lương, chấm công). Chỉ có quyền thực hiện Check-in/Check-out (FR5)."
+🎨 II. Yêu cầu Giao diện (UI/UX)
+1. 🖼️ Các Trang/Màn hình cần có
+Màn hình ,Actor chính ,Mục đích/Nội dung 
+Login,All,Đăng nhập và xác thực Role.
+Dashboard,Admin/HR,"KPI tổng quan (Tổng NV, Chi lương) và Shortcut."
+Quản lý Phòng ban,Admin,Danh sách & Form CRUD (modal) Phòng ban.
+Quản lý Chức vụ,Admin,Danh sách & Form CRUD Chức vụ.
+Quản lý Nhân viên,Admin/HR/Manager,Danh sách (có filters) & Form Thêm/Sửa NV.
+Chấm công,Employee,Nút Check-in/Check-out. Lịch sử chấm công.
+Payroll / Tính lương,HR/Admin,"Chọn Tháng/Năm, chạy Preview/Finalize. Bảng kết quả tính lương."
+Báo cáo Thu nhập,All (theo quyền),Bảng 12 tháng lương/tổng thu nhập (có Export CSV).
+2. 🧱 Layout và Style
+Layout: Sử dụng cấu trúc 3 phần tiêu chuẩn:
+
+
+Header: Tên hệ thống, User profile (hiển thị Role).
+
+
+Left Navigation (Sidebar): Menu chính (Dashboard, Phòng ban, Chức vụ, Nhân viên, Chấm công, Lương, Báo cáo).
+
+
+Content: Khu vực hiển thị nội dung chính của màn hình.
+
+
+Style: Tài liệu không nêu yêu cầu cụ thể về màu sắc/style, nhưng khuyến nghị nên dùng một framework UI (như Material UI, Ant Design, Bootstrap) để đảm bảo tính đồng bộ và responsive.
+
+
+Timezone: Giao diện cần hiển thị thời gian/ngày tháng theo UTC+7 (Asia/VietNam)
+💾 III. Yêu cầu về Database
+1. 📂 Các Bảng cần lưu trữ
+PhongBan 
+
+
+ChucVu 
+
+
+NhanVien 
+
+
+ChamCong 
+
+
+BangLuong 
+
+
+TaiKhoan
+(Lưu ý: Bạn sẽ cần thêm bảng AuditLog để đáp ứng yêu cầu FR8, mặc dù nó không có trong DDL).
+
+
+2. 🔗 Quan hệ giữa các bảng (ERD) 
+
+Sơ đồ ERD (Entity Relationship Diagram) đã minh họa rõ ràng các quan hệ khóa ngoại (Foreign Key - FK) như sau:
+
+1-N (One-to-Many):
+
+
+PhongBan (1) → (N) NhanVien (FK: NhanVien.ma_phong).
+
+
+ChucVu (1) → (N) NhanVien (FK: NhanVien.ma_chuc_vu).
+
+
+NhanVien (1) → (N) ChamCong (FK: ChamCong.ma_nhan_vien).
+
+
+NhanVien (1) → (N) BangLuong (FK: BangLuong.ma_nhan_vien).
+
+
+NhanVien (1) → (1) TaiKhoan (FK: TaiKhoan.ma_nhan_vien).
+

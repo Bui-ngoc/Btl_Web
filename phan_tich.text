@@ -1,0 +1,449 @@
+Quản Lí Nhân Viên
+A — Tài liệu SRS / BRD 
+A.1. Mục tiêu
+Xây dựng phân hệ Quản lý nhân viên (QLNV) để:
+Quản lý phòng ban, chức vụ, nhân viên.
+Ghi nhận chấm công (check-in, check-out).
+Tự động tính lương theo tháng (bao gồm overtime).
+Cung cấp báo cáo tổng thu nhập theo tháng/năm.
+Hỗ trợ thao tác quản trị trên danh sách nhân viên (thêm, sửa, ẩn, xóa).
+A.2. Phạm vi
+Người dùng: Admin/HR (toàn quyền), Manager (quyền hạn giới hạn theo phòng), Employee (xem cá nhân).
+Module: Phòng ban, Chức vụ, Nhân viên, Chấm công, Lương (Payroll), Báo cáo.
+Công nghệ triển khai: FastAPI + MySQL (khuyến nghị), frontend Web/Responsive.
+A.3. Stakeholders
+HR / Người quản lý nhân sự (chủ yêu cầu nghiệp vụ).
+Admin hệ thống / DevOps.
+Developer backend & frontend.
+QA / Tester.
+Người dùng cuối (nhân viên, quản lý phòng).
+A.4. Các yêu cầu chức năng (Functional Requirements - FR)
+FR1: CRUD Phòng ban (ma_phong 3 ký tự, ten_phong, nam_thanh_lap, trang_thai).
+FR2: CRUD Chức vụ (ma_chucvu 1 ký tự, ten_chucvu).
+FR3: CRUD Nhân viên:
+Thêm/Sửa/Xem/Ẩn/Bỏ ẩn/Xóa (soft delete + hard delete chỉ Admin).
+Khi tạo hoặc thay đổi phòng/chức vụ: hệ thống tự sinh ma_nv theo quy tắc.
+FR4: Cập nhật Lương cơ bản (mức lương theo tháng) cho mỗi nhân viên.
+FR5: Ghi nhận chấm công (check-in / check-out) với timestamp; kiểm tra không chồng lấn.
+FR6: Tính lương theo tháng tự động hoặc on-demand (cron job hoặc trigger).
+FR7: Báo cáo tổng thu nhập theo năm/tháng, hiển thị chi tiết (lương cơ bản, overtime, tổng thực nhận).
+FR8: Audit log cho thao tác quan trọng (thay đổi lương, xóa NV, tính lương).
+A.5. Non-functional Requirements (NFR)
+NFR1: Bảo mật: role-based access, JWT.
+NFR2: Hiệu năng: tính lương cho 1000 NV trong < 5s (mục tiêu).
+NFR3: Logging & Audit: lưu log thay đổi.
+NFR4: Data retention: giữ lịch sử chấm công & lương tối thiểu 5 năm.
+NFR5: Localization: tiền tệ VND, timezone Asia/Bangkok (UTC+7) hiển thị.
+NFR6: Backup/Export: xuất CSV báo cáo theo tháng/năm.
+
+B — Use Cases (UC) & mô tả chi tiết
+Mỗi Use Case gồm: ID, Tên, Actor, Mục đích, Precondition, Main Flow, Alternate Flow, Postcondition.
+
+UC-01: Quản lý Phòng ban
+Actor: Admin
+Mục đích: Thêm/Sửa/Xóa/Hiển thị danh sách phòng ban
+Pre: Admin đã đăng nhập
+Main flow:
+1.Admin mở màn Quản lý Phòng ban.
+2.Nhập ma_phong (3 ký tự), ten_phong, nam_thanh_lap, trang_thai.
+3.Hệ thống validate (ma_phong unique, 3 ký tự).
+4.Lưu vào DB.
+Alternate: Nếu ma_phong trùng -> hiện lỗi.
+Post: Phòng ban có trong DB.
+
+UC-02: Quản lý Chức vụ
+Actor: Admin
+Mục đích: Thêm/Sửa/Xóa chức vụ (ma_chucvu 1 ký tự)
+Pre: Admin đã đăng nhập
+Main flow: tương tự UC-01 (validate mã 1 ký tự, unique).
+
+UC-03: Thêm nhân viên mới
+Actor: HR/Admin
+Mục đích: Thêm NV, hệ thống tự sinh mã NV
+Pre: HR đăng nhập, có phòng & chức vụ
+Main flow:
+1.HR nhập: ten_nv, ma_phong, ma_chucvu, luong_co_ban, ngay_vao...
+2.Hệ thống xác nhận phòng & chức vụ tồn tại.
+3.Hệ thống lấy thứ tự vào công ty cuối cùng cho cặp <ma_phong, ma_chucvu> hoặc theo toàn công ty? (Business rule): Ta dùng thứ tự theo toàn công ty (global increment) hoặc theo phòng? Quyết định BA: dùng thứ tự toàn công ty để tránh trùng lặp khi nhân viên chuyển phòng vẫn giữ mã mới hợp lệ. (Chi tiết quy tắc ở phần Business Rules.)
+4.Sinh ma_nv = <ma_phong><ma_chucvu><thutu4digits> (ví dụ: PDTT0001).
+5.Lưu nhân viên.
+Alternate:
+oNếu không có phòng/chức vụ -> lỗi.
+Post: Trả về ma_nv.
+
+UC-04: Cập nhật lương cơ bản
+Actor: HR/Admin
+Pre: HR đăng nhập
+Main flow:
+1.Chọn NV -> thay đổi luong_co_ban.
+2.Hệ thống lưu lịch sử thay đổi (AuditLog).
+Post: Lương mới có hiệu lực từ ngày thay đổi (cần lưu luong_hieu_luc_tu nếu cần).
+
+UC-05: Ghi nhận Check-in / Check-out
+Actor: Employee (hoặc system khi import)
+Purpose: Lưu giờ vào/ra trong ngày
+Pre: Employee đã đăng nhập / có quyền
+Main Flow (Check-in):
+1.Employee gửi check-in (timestamp).
+2.Hệ thống kiểm tra: không có “open session” (check-in chưa có checkout) cho NV vào thời điểm này — nếu có, từ chối hoặc auto-close? (Business rule)
+3.Lưu record ChamCong với checkin = timestamp, checkout = NULL.
+Main Flow (Check-out):
+1.Employee gửi check-out (timestamp).
+2.Hệ thống tìm latest record ChamCong với checkout IS NULL và checkin <= check-out.
+3.Validate: không chồng lấn (checkout > checkin, không overlap với record khác).
+4.Lưu checkout, tính thời lượng session (giờ).
+Alternate: Nếu check-out không có check-in tương ứng -> trả lỗi / allow manual correction.
+Post: Lưu lịch sử chấm công.
+
+UC-06: Tính lương tháng
+Actor: System (cron job) / HR on-demand
+Pre: Có dữ liệu ChamCong cho tháng
+Main Flow:
+1.Lấy tất cả ChamCong của từng NV trong tháng.
+2.Tính tổng giờ làm (tong_gio), làm tròn (rule ở phần business rules).
+3.Nếu tong_gio <= 40 -> luong_thuc_nhan = luong_co_ban.
+Nếu tong_gio > 40:
+so_gio_them = tong_gio - 40
+luong_theo_gio = luong_co_ban / 40
+luong_them = so_gio_them * luong_theo_gio * 1.5
+luong_thuc_nhan = luong_co_ban + luong_them
+4.Lưu vào bảng BangLuong (ma_nv, nam, thang, tong_gio, luong_co_ban, luong_them, luong_thuc_nhan).
+Post: Báo cáo lương sẵn sàng, có thể export.
+
+UC-07: Xem báo cáo thu nhập (theo NV hoặc theo phòng)
+Actor: Admin/Manager/Employee
+Main Flow: chọn năm -> hiển thị bảng 12 tháng (luong_co_ban, tong_gio, luong_thuc_nhan), tổng năm.
+
+C — Quy tắc nghiệp vụ (Business Rules) 
+BR-01: Quy tắc mã nhân viên (ma_nv)
+Cấu trúc: <ma_phong(3)><ma_chucvu(1)><thutu(4)> => tổng 8 ký tự.
+Ví dụ: PDTN0001, PCTP0002.
+ma_phong: 3 ký tự (uppercase, ký tự chữ/chuỗi cho phép chữ + số nếu cần).
+ma_chucvu: 1 ký tự (ví dụ T/P/N).
+thutu: số thứ tự tối đa 4 chữ số, zero-padded bên trái (0001..9999).
+Quy tắc cấp số thứ tự:
+oPhương án đề xuất (đơn giản & an toàn): Số thứ tự là global incremental (toàn công ty) — đảm bảo không trùng khi chuyển phòng/chức vụ. Ví dụ số 1 -> 0001, 2 -> 0002...
+oNếu yêu cầu theo phòng/chức vụ: có thể đổi thành thứ tự theo cặp <ma_phong,ma_chucvu> — lưu ý cần logic tăng riêng cho mỗi cặp.
+Khi NV thay đổi phòng/chức vụ:
+oHệ thống tạo mã NV mới theo quy tắc (nếu yêu cầu). cần xác nhận: có giữ mã cũ không? (thường giữ mã cũ để thuận tiện tracking). Mặc định B đề xuất GIỮ MÃ CŨ; không thay đổi mã khi NV chuyển phòng/chức vụ. Nếu bắt buộc thay đổi thì lưu lịch sử ma_nv_cu -> ma_nv_moi.
+Không cho phép trùng ma_nv.
+Khi xóa cứng (hard-delete) mã không được tái sử dụng.
+BR-02: Quy tắc chấm công & time validation
+Mỗi record ChamCong gồm id, ma_nv, checkin (datetime), checkout (datetime or NULL).
+Một nhân viên có thể có nhiều session trong ngày (ví dụ ra/vào ăn trưa).
+Không cho phép overlap: bất kỳ session mới không được overlap (giao nhau) với session hiện có của NV.
+Check-in must be < Check-out cho cùng session.
+Nếu check-out timestamp < check-in -> reject.
+Nếu nhân viên quên check-out -> HR có quyền chỉnh sửa/close session thủ công.
+If check-in rơi vào thời gian tương lai so với server -> reject (hoặc allow với flag khi đồng bộ).
+Tất cả timestamps lưu trữ ở UTC (server); giao diện hiển thị theo UTC+7.
+Rounding giờ:
+oTính tổng giờ làm từ checkout - checkin theo giờ thập phân.
+oQuy tắc làm tròn: làm tròn đến 0.25 giờ (15 phút). Ví dụ 1 giờ 7 phút -> 1.25 giờ; 1 giờ 14 phút -> 1.00 (nếu <7.5?) —  đề xuất: dùng quy tắc round(minutes / 60, 2) với step 0.25: rounded_hours = round(raw_hours * 4) / 4.
+oTổng giờ tháng = sum(rounded session hours).
+Giờ làm chuẩn cơ bản để tính lương full: 40 giờ / tháng.
+oNếu tong_gio <= 40 => nhận luong_co_ban (không giảm lương).
+oNếu tong_gio > 40 => tính overtime.
+BR-03: Công thức tính lương
+luong_co_ban = số nguyên (VND) theo tháng.
+luong_theo_gio = luong_co_ban / 40 (đơn vị: VND/giờ).
+so_gio_them = max(0, tong_gio - 40)
+luong_them = so_gio_them * luong_theo_gio * 1.5
+luong_thuc_nhan = luong_co_ban + luong_them
+Rounding:
+oluong_theo_gio tính chính xác (float), luong_them làm tròn xuống đến 1 đồng (floor) hoặc round nearest? đề xuất: round đến VND (làm tròn đến 1 đồng) — dùng round(value); có thể config thành floor.
+Nếu luong_co_ban thay đổi trong tháng:
+oQuy tắc phân bổ: tính lương theo mốc thời gian có hiệu lực. (Phức tạp) BA đề xuất ghi luong_co_ban effective date; tính lương theo từng khoảng thời gian trong tháng. Nếu muốn đơn giản: áp dụng mức lương tại thời điểm chạy payroll (như hiện tại). BA cần xác nhận.
+BR-04: Quy tắc ẩn / xóa nhân viên
+Ẩn (soft delete): is_hidden = true — NV không hiển thị danh sách mặc định.
+Xóa cứng (hard delete): chỉ Admin với quyền cao và chỉ khi không có dữ liệu liên quan (hoặc phải migrate data).
+Khi ẩn: vẫn giữ dữ liệu chấm công & lương.
+Nếu NV tiếp tục được kích hoạt (unhide) -> phục hồi.
+BR-05: Audit & Security
+Mọi thay đổi lương/ xóa/ hard-delete/ thay đổi mã NV/ tính lương cần ghi AuditLog (user, action, timestamp, payload).
+Role-based access: chỉ Admin/HR có quyền CRUD NV & tính lương on-demand; Manager chỉ xem & sửa NV trong phòng mình.
+
+D — ERD (Entity Relationship Diagram) — mô tả bảng & quan hệ
+Dưới đây là ERD dạng mô tả 
+Bảng: PhongBan
+ma_phong CHAR(3) PK
+ten_phong VARCHAR(100)
+nam_thanh_lap YEAR NULL
+trang_thai ENUM('HoatDong','NgungHoatDong') DEFAULT 'HoatDong'
+
+Bảng: ChucVu
+ma_chucvu CHAR(1) PK
+ten_chucvu VARCHAR(100)
+Bảng: NhanVien
+ma_nhan_vien VARCHAR(12) PK
+ten_nhan_vien VARCHAR(255) NOT NULL
+ma_phong CHAR(3) FK -> PhongBan.ma_phong
+ma_chuc_vu CHAR(1) FK -> ChucVu.ma_chucvu
+luong_co_ban BIGINT NOT NULL
+ngay_vao DATE
+trang_thai ENUM('DangLam','DaNghi','TamNghi') DEFAULT 'DangLam'
+Bảng: ChamCong
+id INT PK AUTO_INCREMENT
+ma_nhan_vien VARCHAR(10),
+ngay_lam DATE,
+gio_vao TIME,
+ gio_ra TIME,
+ FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien),
+ UNIQUE(ma_nhan_vien, ngay_lam) 
+Bảng: BangLuong
+id INT AUTO_INCREMENT PRIMARY KEY,
+ma_nhan_vien VARCHAR(10),
+thang INT,
+nam INT,
+tong_gio_lam DECIMAL(6,2),
+luong_co_ban DECIMAL(12,2),
+luong_them_gio DECIMAL(12,2),
+tong_luong DECIMAL(12,2),
+FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien),
+UNIQUE(ma_nhan_vien, thang, nam)
+Bảng: Taikhoan
+username VARCHAR(50) PRIMARY KEY,
+password VARCHAR(255) NOT NULL,
+role ENUM('admin', 'hr', 'nhanvien'),
+ma_nhan_vien VARCHAR(10),
+FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien)
+E — Mockups / Wireframes (mô tả màn hình chính)
+
+E.1 Dashboard (Admin/HR)
+Header: Tên hệ thống | User profile (role)
+Left Nav: Dashboard | Phòng ban | Chức vụ | Nhân viên | Chấm công | Lương | Báo cáo | Cài đặt
+Main:
+oKPI: Tổng NV, NV đang làm, NV nghỉ, Tổng chi lương tháng hiện tại
+oShortcut: Thêm NV, Chạy payroll, Import chấm công
+E.2 Danh sách Phòng ban
+Table: Ma phòng | Tên | Năm thành lập | Trạng thái | Actions (Edit/Delete)
+E.3 Danh sách Chức vụ
+Table: Ma | Tên | Actions
+E.4 Danh sách Nhân viên
+Filters: search (ma_nhan_vien/ten), filter by phong, chucvu, trang_thai, is_hidden
+Columns: Ma NV | Tên | Phòng | Chức vụ | Lương cơ bản | Ngày vào | Trạng thái | Actions (Edit, Hide/Unhide, View history)
+Button: Thêm Nhân Viên (form modal)
+E.5 Form Thêm/Sửa Nhân viên (modal)
+Fields: Ten NV, Chọn Phòng (dropdown), Chọn Chức Vụ (dropdown), Luong co ban (number), Ngay vao (date)
+Display: Ma NV (auto-gen shown read-only after Save)
+Actions: Save, Cancel
+E.6 Màn hình Chấm công (Employee)
+Button Check-in / Check-out (show last session)
+Lịch sử hôm nay: list sessions (checkin, checkout, duration)
+Lưu ý lỗi nếu chồng lấn.
+E.7 Màn hình Payroll / Tính lương
+Select: Năm, Tháng, Scope (Toàn công ty / Phòng)
+Buttons: Tính thử (Preview) / Finalize (ghi BangLuong status=Finalized)
+Table: MaNV | Ten | Tong gio | Luong co ban | Luong them | Luong thuc nhan | Action (View details, Export)
+
+F — Luồng nghiệp vụ (Sequence Diagrams — mô tả từng bước)
+F.1 Flow: Thêm nhân viên (sequence)
+1.HR -> System: open Add Employee form
+2.HR -> System: submit (ten, ma_phong, ma_chucvu, luong)
+3.System -> DB: validate ma_phong & ma_chucvu exist
+4.System -> DB: lấy next_sequence (global)
+5.System -> generate ma_nv = ma_phong + ma_chucvu + zero_pad(next_seq,4)
+6.System -> DB: insert NhanVien
+7.System -> DB: insert AuditLog
+8.System -> HR: response success + ma_nv
+F.2 Flow: Check-in / Check-out
+1.Employee -> System: request check-in (timestamp)
+2.System -> DB: query last sessions of Employee for overlap
+3.If OK: insert ChamCong with checkin; return success
+4.Employee -> System: request check-out (timestamp)
+5.System -> DB: find last session with checkout IS NULL, validate checkout > checkin, no overlap
+6.System -> update ChamCong checkout, compute raw_hours, rounded_hours, update duration_hours
+7.System -> DB: AuditLog (optional)
+F.3 Flow: Tính lương tháng
+1.Scheduler/HR -> System: run payroll for (year,month)
+2.System -> DB: for each NV:
+oquery ChamCong in period -> sum(rounded durations)
+oapply formula -> compute luong_them, luong_thuc_nhan
+oinsert/update BangLuong (status=Draft)
+3.HR previews -> Finalize -> BangLuong status=Finalized (cannot auto-change without unlock)
+4.System -> DB: AuditLog
+
+G — Test Cases & Acceptance Tests (chi tiết)
+Mỗi test case gồm: ID, Title, Precondition, Steps, Expected result.
+
+G.1. Test case: TC-01 Thêm phòng ban hợp lệ
+Pre: Admin đã đăng nhập
+Steps: tạo phòng ban ma_phong=PDX, ten=Phòng Dịch vụ X, nam_thanh_lap=2010
+Expected: Trả về success; DB có record.
+G.2. TC-02 Thêm chức vụ hợp lệ
+Pre: Admin
+Steps: thêm ma_chucvu=T, ten=Truong phong
+Expected: success.
+G.3. TC-03 Thêm nhân viên & sinh mã NV
+Pre: Phòng PDX & chức vụ T tồn tại
+Steps: Add NV: ten="Nguyen A", ma_phong=PDX, ma_chucvu=T, luong_co_ban=4000000
+Expected:
+oSystem trả về ma_nv dạng PDXT0001 (tùy sequence).
+oDB lưu NhanVien với các thông tin đúng.
+oAuditLog ghi.
+G.4. TC-04 Check-in bình thường
+Pre: NV active
+Steps: gửi check-in timestamp 2025-11-05 08:00
+Expected: ChamCong record new with checkout NULL.
+G.5. TC-05 Check-out bình thường
+Pre: tồn tại ChamCong checkin 08:00
+Steps: gửi checkout 12:00
+Expected: ChamCong updated checkout=12:00, duration_hours rounded = 4.0
+G.6. TC-06 Không cho phép overlap sessions
+Pre: đã có session 08:00-12:00
+Steps: check-in 11:00
+Expected: hệ thống trả lỗi "Overlap với session hiện tại" và không tạo session.
+G.7. TC-07 Tính lương với overtime
+Pre: NhanVien luong_co_ban = 4,000,000; ChamCong tổng = 45.0 giờ (đã rounding)
+Steps: chạy payroll cho tháng
+Expected:
+oso_gio_them = 5.0
+oluong_theo_gio = 4,000,000 / 40 = 100,000
+oluong_them = 5 * 100,000 * 1.5 = 750,000
+oluong_thuc_nhan = 4,750,000
+oBangLuong lưu đúng.
+G.8. TC-08 Lương <= 40 giờ
+Pre: tong_gio = 38
+Expected: luong_thuc_nhan = luong_co_ban
+G.9. TC-09 Round hours rule
+Pre: session duration raw = 1h7min (1.1166..h)
+Steps: compute rounded_hours
+Expected: rounded_hours = 1.25 (vì round(raw * 4) /4)
+G.10. TC-10 Ẩn nhân viên
+Pre: NV tồn tại
+Steps: HR chọn Hide
+Expected: is_hidden = true; danh sách mặc định không hiển thị NV.
+
+H — Acceptance Criteria 
+1.Khi thêm nhân viên, hệ thống tự sinh mã NV theo cấu trúc <ma_phong(3)><ma_chucvu(1)><thutu4digits>.
+oQuy tắc cấp số thứ tự: Global incremental.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+2.Mã NV không thay đổi khi nhân viên chuyển phòng/chức vụ (keep old ma_nv).
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+3.Check-in / Check-out: hệ thống không cho phép session chồng lấn; session phải có check-in trước check-out.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+4.Rounding giờ: làm tròn tới 15 phút (0.25h): rounded = round(raw_hours * 4) / 4.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+5.Quy tắc tính lương:
+oNếu tong_gio <= 40 thì luong_thuc_nhan = luong_co_ban.
+oNếu tong_gio > 40:
+luong_theo_gio = luong_co_ban / 40
+luong_them = so_gio_them * luong_theo_gio * 1.5
+luong_thuc_nhan = luong_co_ban + luong_them
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+6.Nếu luong_co_ban thay đổi trong tháng thì áp dụng:
+oA: Áp dụng mức lương tại thời điểm finalize payroll (đơn giản).
+oB: Áp dụng phân bổ theo effective date (phức tạp hơn).
+oHR chọn: [ ] A [ ] B — Comment: _______
+7.Khi finalize payroll, payroll record sẽ có status=Finalized và không auto chỉnh sửa trừ khi HR unlock & ghi log.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+8.Audit: tất cả thay đổi lương, xóa/hard-delete, finalize payroll sẽ được ghi AuditLog.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+9.Soft delete (ẩn) NV sẽ giữ nguyên dữ liệu chấm công & lương; chỉ ẩn khỏi danh sách mặc định. Hard delete chỉ Admin & có confirm.
+oHR: [ ] Agree [ ] Disagree [ ] Comment: _______
+
+I —Chuyển giao cho DEV/QA
+1.Xác nhận các quyết định có ảnh hưởng luật & thuế: nếu muốn áp thuế/khấu trừ BHXH, BHYT, thuế TNCN, BA cần thêm yêu cầu (hiện tại chỉ tính gross salary).
+2.Chốt rule về mã NV khi chuyển phòng (giữ hay đổi) — BA đã đề xuất giữ mã cũ; HR xác nhận.
+3.Chốt rule lương thay đổi trong tháng (Áp dụng A hay B).
+4.Xác định timezone & định dạng hiển thị (BA đề xuất UTC lưu, hiển thị Asia/Bangkok).
+5.Security: cần xác thực & role-based endpoints; dev cần mapping role->capability.
+6.API contract, ERD SQL, OpenAPI spec, seed data & mock JSON 
+
+J — Tài liệu bàn giao nhanh (Checklist BA -> DEV/QA)
+File SRS/BRD (this doc) 
+ERD diagram (draw.io) + DDL SQL 
+OpenAPI endpoints 
+Mockups (Figma/PNG) 
+Test cases 
+Seed data 
+
+
+
+
+
+CREATE DATABASE IF NOT EXISTS baitaplon;
+USE baitaplon;
+
+CREATE TABLE PhongBan (
+    ma_phong CHAR(3) PRIMARY KEY,
+    ten_phong VARCHAR(100) NOT NULL,
+    nam_thanh_lap YEAR,
+    trang_thai ENUM('HoatDong', 'NgungHoatDong') DEFAULT 'HoatDong'
+);
+CREATE TABLE ChucVu (
+    ma_chuc_vu CHAR(1) PRIMARY KEY,
+    ten_chuc_vu VARCHAR(100) NOT NULL
+);
+CREATE TABLE NhanVien (
+    ma_nhan_vien VARCHAR(10) PRIMARY KEY,
+    ten_nhan_vien VARCHAR(100) NOT NULL,
+    ma_phong CHAR(3),
+    ma_chuc_vu CHAR(1),
+    muc_luong_co_ban DECIMAL(12,2) NOT NULL,
+    ngay_vao_lam DATE,
+    trang_thai ENUM('DangLam', 'DaNghi') DEFAULT 'DangLam',
+    FOREIGN KEY (ma_phong) REFERENCES PhongBan(ma_phong),
+    FOREIGN KEY (ma_chuc_vu) REFERENCES ChucVu(ma_chuc_vu)
+);
+CREATE TABLE ChamCong (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ma_nhan_vien VARCHAR(10),
+    ngay_lam DATE,
+    gio_vao TIME,
+    gio_ra TIME,
+    FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien),
+    UNIQUE(ma_nhan_vien, ngay_lam)
+);
+CREATE TABLE BangLuong (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ma_nhan_vien VARCHAR(10),
+    thang INT,
+    nam INT,
+    tong_gio_lam DECIMAL(6,2),
+    luong_co_ban DECIMAL(12,2),
+    luong_them_gio DECIMAL(12,2),
+    tong_luong DECIMAL(12,2),
+    FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien),
+    UNIQUE(ma_nhan_vien, thang, nam)
+);
+CREATE TABLE TaiKhoan (
+    username VARCHAR(50) PRIMARY KEY,
+    password VARCHAR(255) NOT NULL,
+    role ENUM('admin', 'hr', 'nhanvien'),
+    ma_nhan_vien VARCHAR(10),
+    FOREIGN KEY (ma_nhan_vien) REFERENCES NhanVien(ma_nhan_vien)
+);
+--------------------------------------------ERD-----------------------------------------------
+
+
+
+Ý tưởng chính: Quản lý thông tin nhân viên, bao gồm chấm công, tính lương và báo cáo theo tháng.
+
+Yêu cầu:
+
+- Quản lý thông tin phòng ban trong đơn vị, mỗi phòng ban có: Tên phòng, mã phòng (3 ký tự), năm thành lập, trạng thái. Ví dụ: PDT, PCT, …
+
+- Quản lý danh mục chức vụ trong đơn vị, mỗi chức vụ có: Tên chức vụ, mã chức vụ (1 ký tự). Ví dụ: T cho chức vụ trưởng phòng, P cho phó trưởng phòng, N cho nhân viên…
+
+- Quản lý các thông tin cơ bản của nhân viên: mã nhân viên, tên, phòng ban, chức vụ, mức lương cơ bản hiện tại. Khi thêm mới nhân viên hoặc thay đổi đơn vị, chức vụ, hệ thống tự động cập nhật mã nhân viên theo cú pháp <Mã đơn vị><Mã chức vụ><Thứ tự vào công ty>. Trong đó thứ tự vào công ty có tối đa 4 chữ số.
+
+Ví dụ: PDTT0001, PCTP0002
+
+- Cho phép thêm, sửa, ẩn/bỏ ẩn/xóa nhân viên
+
+- Cho phép cập nhật mức lương cơ bản tính theo tháng của từng nhân viên.
+
+- Ghi nhận giờ làm việc: Ghi lại thời gian checkin và checkout của nhân viên hàng ngày, hệ thống phải đảm bảo giờ checkin và checkout không bị chồng lấn.
+
+- Tính lương: Hệ thống sẽ tự động tính toán lương hàng tháng dựa trên giờ làm việc thực tế. Cách tính: Từ ghi nhận giờ làm việc của nhân viên, tính được tổng số giờ làm việc theo tháng. Nếu nhân viên làm việc dưới 40 giờ 1 tháng thì lương nhận được bằng mức lương cơ bản. Nếu làm việc trên 40 giờ 1 tháng thì lương nhận được bằng mức lương cơ bản + (số giờ làm thêm * mức lương cơ bản theo giờ * 1.5)
+
+Ví dụ: Giả sử một nhân viên có mức lương cơ bản là 4.000.000 VNĐ, làm việc 45 giờ trong tháng.
+
++ Số giờ làm thêm: 5 giờ
+
++ Lương làm thêm giờ: 4.000.000 / 40 * 5 * 1.5 = 750.000
+
++ Tổng lương: 4.000.000 + 750.000 = 4.750.000
+
+- Thống kê tổng thu nhập của nhân viên theo năm, xem chi tiết thu nhập qua từng tháng (lương cơ bản, lương thực nhận)
